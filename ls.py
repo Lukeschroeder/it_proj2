@@ -4,8 +4,9 @@ infilename = 'PROJI-DNSRS.txt'
 DNStable = {}
 TS_hostname = None
 from networking import Server, Client
+from threading import Thread, Event
 datalength = 200
-
+import time
 
 lsListenPort = None
 ts1Hostname = None
@@ -13,32 +14,59 @@ ts1ListenPort = None
 ts2Hostname = None
 ts2ListenPort = None
 
+response = ''
+
+
+
+def readresponse(client, hostname, e):
+    global response 
+
+    client.settimeout(5.0)
+    try:
+        response = client.socket.recv(datalength).decode('utf-8')
+        e.set()
+    except socket.timeout:
+        if response == '':
+            response = hostname + ' - Error:HOST NOT FOUND'
+            e.set()
+
+
+
 
 def contactTSservers(server, ts1client, ts2client):
+    global response
+    global threads
 
     ts1client.connecttoserver(ts1Hostname, ts1ListenPort)
     ts2client.connecttoserver(ts2Hostname, ts2ListenPort)
+    e = Event()
+
 
     while(True):
         hostname = server.activesocket.recv(datalength)
         if len(hostname) == 0: break
+
+        response = ''
+        threads = []
+        
+
         ts1client.socket.send(hostname)
         ts2client.socket.send(hostname)
-        ts1client.settimeout(5.0)
-        ts2client.settimeout(5.0)
 
-        try:
-            response = ts1client.socket.recv(datalength).decode('utf-8')
-            if len(response) > 0:
-                server.activesocket.send(response.encode('utf-8'))
-        except socket.timeout:
-            try:
-                response = ts2client.socket.recv(datalength).decode('utf-8')
-                if len(response) > 0:   
-                    server.activesocket.send(response.encode('utf-8'))
-            except socket.timeout:
-                response = hostname + ' - Error:HOST NOT FOUND'
-                server.activesocket.send(response.encode('utf-8'))
+        threads.append(Thread(target=readresponse, args=(ts1client, hostname, e)))
+        threads.append(Thread(target=readresponse, args=(ts2client, hostname, e)))
+
+        tic = time.time()
+        threads[0].start()
+        threads[1].start()
+        e.wait()
+        e.clear()
+        toc = time.time()
+
+        print 'Hostname: ' + hostname + ' Time: ' + str(round(toc - tic, 5)) + '(s)'
+
+        server.activesocket.send(response.encode('utf-8'))
+    
 
         
 
